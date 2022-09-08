@@ -50,6 +50,25 @@ impl CPU {
     }
 
     /*==============helpers============*/
+    pub fn set_reg_A(&mut self, data: u8){
+        self.A = data;
+        self.set_state4reg(self.A);
+    }
+    pub fn set_reg_X(&mut self, data: u8){
+        self.X = data;
+        self.set_state4reg(self.X);
+    }
+    pub fn set_reg_Y(&mut self, data: u8){
+        self.Y = data;
+        self.set_state4reg(self.Y);
+    }
+
+    pub fn fetch_operand(&mut self, mode: &AddressingMode) -> u8{
+        let operand_address = self.get_operand_address(mode);
+        let operand = self.mem_read(operand_address);
+        operand
+    }
+
     pub fn fetch_next(&mut self) -> u8{
         let op = self.ram[self.pc as usize];
         self.pc += 1;
@@ -181,16 +200,99 @@ impl CPU {
     /*==============cpu loop============*/
     // load to a
     pub fn lda(&mut self, mode: &AddressingMode){
-        let operand_address = self.get_operand_address(mode);
-        let operand = self.mem_read(operand_address);
         // load operand into A
-        self.A = operand;
-        self.set_state4reg(self.A);
+        let operand = self.fetch_operand(mode);
+        self.set_reg_A(operand);
     }
     // store a to mem
     pub fn sta(&mut self, mode: &AddressingMode){
         let operand_address = self.get_operand_address(mode);
         self.mem_write(operand_address, self.A);
+    }
+
+    // load to X
+    pub fn ldx(&mut self, mode: &AddressingMode){
+        let operand = self.fetch_operand(mode);
+        // load operand into X
+        self.set_reg_X(operand);
+    }
+    // store a to mem
+    pub fn stx(&mut self, mode: &AddressingMode){
+        let operand_address = self.get_operand_address(mode);
+        self.mem_write(operand_address, self.X);
+    }
+
+    // load to Y
+    pub fn ldy(&mut self, mode: &AddressingMode){
+        let operand = self.fetch_operand(mode);
+        // load operand into Y
+        self.set_reg_Y(operand);
+    }
+    // store a to mem
+    pub fn sty(&mut self, mode: &AddressingMode){
+        let operand_address = self.get_operand_address(mode);
+        self.mem_write(operand_address, self.Y);
+    }
+
+    /*arithmetic */
+
+    fn add_to_register_a(&mut self, data: u8) {
+        let sum = self.A as u16
+            + data as u16
+            + (if self.state & CARRY_MASK == 1{
+                1
+            } else {
+                0
+            }) as u16;
+
+        let carry = sum > 0xff;
+
+        if carry {
+            self.set_state(CARRY_MASK, true);
+        } else {
+            self.set_state(CARRY_MASK, false);
+        }
+
+        let result = sum as u8;
+
+        if (data ^ result) & (result ^ self.A) & 0x80 != 0 {
+            self.set_state(OVERFLOW_MASK, true);
+        } else {
+            self.set_state(OVERFLOW_MASK, true);
+        }
+
+        self.set_reg_A(result);
+    }
+
+    pub fn adc(&mut self, mode: &AddressingMode){
+        let operand = self.fetch_operand(mode);
+        self.add_to_register_a(operand);
+    }
+
+    pub fn sbc(&mut self, mode: &AddressingMode){
+        let operand = self.fetch_operand(mode);
+        self.add_to_register_a(((operand as i8).wrapping_neg().wrapping_sub(1)) as u8);
+    }
+
+    pub fn and(&mut self, mode: &AddressingMode){
+        let operand = self.fetch_operand(mode);
+        self.A = self.A & operand;
+        // set zero&neg bit
+        self.set_state4reg(self.A);
+    }
+
+    pub fn xor(&mut self, mode: &AddressingMode){
+        let operand = self.fetch_operand(mode);
+        self.A = self.A ^ operand;
+        // set zero&neg bit
+        self.set_state4reg(self.A);
+    }
+
+    pub fn ior(&mut self, mode: &AddressingMode){
+        let operand = self.fetch_operand(mode);
+        self.A = self.A | operand;
+        // set zero&neg bit
+        self.set_state4reg(self.A);
     }
 
 
@@ -210,10 +312,120 @@ impl CPU {
                 0x85 | 0x95 | 0x8d | 0x9d | 0x99 | 0x81 | 0x91 => {
                     self.sta(&code.mode);
                 }
+                // LDX
+                0xa2 | 0xa6 | 0xb6 | 0xae | 0xbe => {
+                    self.ldx(&code.mode);
+                }
+                // STX
+                0x86 | 0x96 | 0x8e => {
+                    self.stx(&code.mode);
+                }
+                // LDY
+                0xa0 | 0xa4 | 0xb4 | 0xac | 0xbc => {
+                    self.ldy(&code.mode);
+                }
+                // STY
+                0x84 | 0x94 | 0x8c => {
+                    self.stx(&code.mode);
+                }
                 // TAX: transfer X to A
                 0xaa => {
                     self.X = self.A;
                     self.set_state4reg(self.X);
+                }
+                // TAY
+                0xa8 => {
+                    self.Y = self.A;
+                    self.set_state4reg(self.Y);
+                }
+                // TXA
+                0x8a => {
+                    self.A = self.X;
+                    self.set_state4reg(self.A);
+                }
+                // TYA
+                0x98 => {
+                    self.A = self.Y;
+                    self.set_state4reg(self.A);
+                }
+                // TSX
+                0xba => {
+                    self.X = self.sp as u8;
+                    self.set_state4reg(self.X);
+                }
+                // TXS
+                0x9a => {
+                    self.sp = self.X as u16;
+                }
+                /*arithmetic */
+                // and 
+                0x29 | 0x25 | 0x35 | 0x2d | 0x3d | 0x39 | 0x21 | 0x31 => {
+                    self.and(&code.mode);
+                }
+                // eor 
+                0x49 | 0x45 | 0x55 | 0x4d | 0x5d | 0x59 | 0x41 | 0x51 => {
+                    self.xor(&code.mode);
+                }
+                // ora 
+                0x09 | 0x05 | 0x15 | 0x0d | 0x1d | 0x19 | 0x01 | 0x11 => {
+                    self.ior(&code.mode);
+                }
+                // adc 
+                0x69 | 0x65 | 0x75 | 0x6d | 0x7d | 0x79 | 0x61 | 0x71 => {
+                    self.adc(&code.mode);
+                }
+                // sbc 
+                0xe9 | 0xe5 | 0xf5 | 0xed | 0xfd | 0xf9 | 0xe1 | 0xf1 => {
+                    self.sbc(&code.mode);
+                }
+                // dec
+                0xc6 | 0xd6 | 0xce | 0xde => {
+                    let operand = self.fetch_operand(&code.mode);
+                    let result = operand.wrapping_sub(1);
+                    self.set_state4reg(result);
+                }
+                // inc
+                0xe6 | 0xf6 | 0xee | 0xfe => {
+                    let operand = self.fetch_operand(&code.mode);
+                    let result = operand.wrapping_add(1);
+                    self.set_state4reg(result);
+                }
+                // dex
+                0xca => {
+                    self.X = self.X.wrapping_sub(1);
+                    self.set_state4reg(self.X);
+                }
+                // dey
+                0x88 => {
+                    self.Y = self.Y.wrapping_sub(1);
+                    self.set_state4reg(self.Y);
+                }
+                // iny
+                0xc8 => {
+                    self.Y = self.Y.wrapping_add(1);
+                    self.set_state4reg(self.Y);
+                }
+                /* set flags */
+                // sec
+                0x38 => {
+                    self.set_state(CARRY_MASK, true);
+                }
+                0x18 => {
+                    self.set_state(CARRY_MASK, false);
+                }
+                // sed
+                0xf8 => {
+                    self.set_state(DECIMAL_MASK, true);
+                }
+                0xd8 => {
+                    self.set_state(DECIMAL_MASK, false);
+                }
+                // sei
+                0x78 => {
+                    self.set_state(IRQ_MASK, true);
+                }
+                0x58 => {
+                    self.set_state(IRQ_MASK, false);
                 }
                 // INX: increment X
                 0xe8 => {
@@ -224,6 +436,8 @@ impl CPU {
                 0x00 => {
                     return;
                 }
+                //nop
+                0xea => {}
                 _ => unimplemented!("op code {}", op)
             }   // match
             if program_counter_state == self.pc {
