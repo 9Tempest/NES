@@ -1,4 +1,4 @@
-use cpu::CPU;
+use cpu::{CPU, Mem};
 use rand::Rng;
 use sdl2::event::Event;
 use sdl2::EventPump;
@@ -116,6 +116,7 @@ fn snake_game() {
     let mut cpu = CPU::new();
     cpu.load_program(&game_code);
     cpu.reset();
+    
 
     let mut screen_state = [0 as u8; 32 * 3 * 32];
     let mut rng = rand::thread_rng();

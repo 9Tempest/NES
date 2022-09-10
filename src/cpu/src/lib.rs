@@ -1,6 +1,10 @@
 
 pub mod tests;
 pub mod opcode;
+pub mod bus;
+use std::fmt::Display;
+
+use bus::Bus;
 use opcode::*;
 // masks
 const CARRY_MASK: u8 = 0b0000_0001;
@@ -21,6 +25,10 @@ const STACK_RESET: u8 = 0xfd;
 const PC_LOAD_ADDR: u16 = 0xFFFC;
 const CODE_START_ADDR: usize = 0x0600;
 
+
+
+
+
 #[derive(Debug)]
 #[allow(non_camel_case_types)]
 pub enum AddressingMode {
@@ -37,6 +45,25 @@ pub enum AddressingMode {
    Accumulator,
 }
 
+pub trait Mem {
+    fn mem_read(&self, addr: u16) -> u8;
+
+    fn mem_write(&mut self, addr: u16, data: u8);
+
+    fn mem_read_u16(&self, pos: u16) -> u16 {
+        let lo = self.mem_read(pos) as u16;
+        let hi = self.mem_read(pos + 1) as u16;
+        (hi << 8) | (lo as u16)
+    }
+
+    fn mem_write_u16(&mut self, pos: u16, data: u16) {
+        let hi = (data >> 8) as u8;
+        let lo = (data & 0xff) as u8;
+        self.mem_write(pos, lo);
+        self.mem_write(pos + 1, hi);
+    }
+}
+
 pub struct CPU{
     A: u8,
     X: u8,
@@ -45,11 +72,36 @@ pub struct CPU{
     sp: u8,
     state: u8,
     ram: [u8; RAM_SIZE],
+    bus: Bus,
 }
+
+/*==============memory============*/
+impl Mem for CPU {
+    fn mem_read(&self, addr: u16) -> u8 {
+        self.bus.mem_read(addr)
+    }
+
+    fn mem_write(&mut self, addr: u16, data: u8) {
+        self.bus.mem_write(addr, data);
+    }
+}
+use std::io::Read;
 
 impl CPU {
     // debug
-    pub fn print_status(&mut self){
+    pub fn print_status(&mut self, code: &OpCode){
+
+        // clear screen and move cursor
+        print!("\x1b[2J\x1b[H");
+        println!("INSTRUCTION:");
+        match code.mode {
+            AddressingMode::NoneAddressing => {
+                println!("INS: {}", code.name);
+            }
+            _ => {
+                println!("INS: {}; operand: {}", code.name, self.fetch_operand(&code.mode));
+            }
+        }
         println!("REGISTERS:");
         println!("A: {} X: {} Y: {} pc: {:x} sp: {:x}", self.A, self.X, self.Y, self.pc, self.sp);
         println!("STATUS:");
@@ -57,7 +109,7 @@ impl CPU {
     }
     // constructor
     pub fn new() ->Self{
-        Self { A: 0, X: 0, Y: 0, pc: CODE_START_ADDR as u16, sp: STACK_RESET, state: 0b0010_0100, ram: [0; RAM_SIZE],}
+        Self { A: 0, X: 0, Y: 0, pc: CODE_START_ADDR as u16, sp: STACK_RESET, state: 0b0010_0100, ram: [0; RAM_SIZE], bus: Bus::new()}
     }
 
     /*==============helpers============*/
@@ -149,15 +201,15 @@ impl CPU {
             AddressingMode::Accumulator => self.A,
             _ => {
                 let operand_address = self.get_operand_address(mode);
-            let operand = self.mem_read(operand_address);
-            operand
+                let operand = self.mem_read(operand_address);
+                operand
             }   
         }  // mode
     }  // fetch operand
 
     /* fetch next instruction and update pc */
     fn fetch_next(&mut self) -> u8{
-        let op = self.ram[self.pc as usize];
+        let op = self.mem_read(self.pc);
         self.pc += 1;
         op
     }
@@ -224,15 +276,15 @@ impl CPU {
                 addr
             }
             AddressingMode::Absolute => {
-                self.mem_read_16(self.pc)
+                self.mem_read_u16(self.pc)
             }
             AddressingMode::Absolute_X => {
-                let pos = self.mem_read_16(self.pc );
+                let pos = self.mem_read_u16(self.pc );
                 let addr = pos.wrapping_add(self.X as u16);
                 addr
             }
             AddressingMode::Absolute_Y => {
-                let pos = self.mem_read_16(self.pc);
+                let pos = self.mem_read_u16(self.pc);
                 let addr = pos.wrapping_add(self.Y as u16);
                 addr
             }
@@ -257,43 +309,22 @@ impl CPU {
         }
     }
 
-    /*==============memory============*/
-    pub fn mem_read(&self, addr: u16) -> u8{
-        self.ram[addr as usize]
-    }
 
-    pub fn mem_write(&mut self, addr: u16, value: u8) {
-        
-        self.ram[addr as usize] = value;
-    }
-
-    pub fn mem_read_16(&self, addr: u16) -> u16{
-        
-        let lo = self.mem_read(addr) as u16;
-        let hi = self.mem_read(addr+1) as u16;
-        //println!("hi {:#x} lo {:#x} addr {:#x}", hi, lo, addr);
-        (hi << 8) | (lo as u16)
-    }
-
-    pub fn mem_write_16(&mut self, addr: u16, value: u16){
-        let lo = (value & 0xFF) as u8;
-        let hi = (value >> 8) as u8;
-        self.mem_write(addr, lo);
-        self.mem_write(addr+1, hi);
-    }
 
     pub fn reset(&mut self){
         self.A = 0;
         self.X = 0;
         self.Y = 0;
         self.state = 0b0010_0100;
-        self.pc = self.mem_read_16(PC_LOAD_ADDR);
+        self.pc = self.mem_read_u16(PC_LOAD_ADDR);
         self.sp = STACK_RESET;
     }
 
     pub fn load_program(&mut self, program: &Vec<u8>){
-        self.ram[CODE_START_ADDR..(CODE_START_ADDR+program.len())].copy_from_slice(&program[..]);
-        self.mem_write_16(PC_LOAD_ADDR, CODE_START_ADDR as u16);
+        for i in 0..(program.len() as u16) {
+            self.mem_write(0x0600 + i, program[i as usize]);
+        }
+        self.mem_write_u16(PC_LOAD_ADDR, CODE_START_ADDR as u16);
     }
 
     pub fn load_and_run(&mut self, program: Vec<u8>){
@@ -415,6 +446,8 @@ impl CPU {
     }
 
     pub fn run_with_callback<F> (&mut self, mut callback: F) where F:FnMut(&mut CPU){
+        // manually set pc for now
+        self.pc = 0x0600;
         let ref opcodes = *opcode::OPCODES_MAP;
         loop {
             // callback
@@ -425,7 +458,8 @@ impl CPU {
             let program_counter_state = self.pc;
             // fetch code map
             let code = opcodes.get(&op).expect(&format!("OpCode {:x} is not recongnized", op));
-            
+            // for debugging
+            self.print_status(code);
             // pattern matching for instruction
             match op {
                 // return 
@@ -441,13 +475,13 @@ impl CPU {
                 }
                 /* JMP Absolute */
                 0x4c => {
-                    let mem_address = self.mem_read_16(self.pc);
+                    let mem_address = self.mem_read_u16(self.pc);
                     self.pc = mem_address;
                 }
 
                 /* JMP Indirect */
                 0x6c => {
-                    let mem_address = self.mem_read_16(self.pc);
+                    let mem_address = self.mem_read_u16(self.pc);
                     // let indirect_ref = self.mem_read_u16(mem_address);
                     //6502 bug mode with with page boundary:
                     //  if address $3000 contains $40, $30FF contains $80, and $3100 contains $50,
@@ -459,13 +493,13 @@ impl CPU {
                         let hi = self.mem_read(mem_address & 0xFF00);
                         (hi as u16) << 8 | (lo as u16)
                     } else {
-                        self.mem_read_16(mem_address)
+                        self.mem_read_u16(mem_address)
                     };
                     self.pc = indirect_ref;
                 }
                 // jsr
                 0x20 => {
-                    let mem_address = self.mem_read_16(self.pc);
+                    let mem_address = self.mem_read_u16(self.pc);
                     self.stack_push_u16(self.pc+2-1);
                     self.pc = mem_address;
                 }
