@@ -1,7 +1,7 @@
 
-pub mod tests;
 pub mod opcode;
 pub mod bus;
+pub mod rom;
 use std::fmt::Display;
 
 use bus::Bus;
@@ -23,7 +23,7 @@ const STACK_RESET: u8 = 0xfd;
 
 // address
 const PC_LOAD_ADDR: u16 = 0xFFFC;
-const CODE_START_ADDR: usize = 0x0600;
+const CODE_START_ADDR: usize = 0x8600;
 
 
 
@@ -108,8 +108,8 @@ impl CPU {
         println!("C: {} Z: {} I: {} B1: {} B2: {} V: {} N: {}", self.fetch_carry_bit(), self.fetch_zero_bit(), self.fetch_irq_bit(), self.fetch_break1_bit(), self.fetch_break2_bit(), self.fetch_overflow_bit(), self.fetch_negative_bit());
     }
     // constructor
-    pub fn new() ->Self{
-        Self { A: 0, X: 0, Y: 0, pc: CODE_START_ADDR as u16, sp: STACK_RESET, state: 0b0010_0100, ram: [0; RAM_SIZE], bus: Bus::new()}
+    pub fn new(bus: Bus) ->Self{
+        Self { A: 0, X: 0, Y: 0, pc: CODE_START_ADDR as u16, sp: STACK_RESET, state: 0b0010_0100, ram: [0; RAM_SIZE], bus: bus}
     }
 
     /*==============helpers============*/
@@ -316,15 +316,15 @@ impl CPU {
         self.X = 0;
         self.Y = 0;
         self.state = 0b0010_0100;
-        self.pc = self.mem_read_u16(PC_LOAD_ADDR);
+        self.pc = CODE_START_ADDR as u16;
         self.sp = STACK_RESET;
     }
 
-    pub fn load_program(&mut self, program: &Vec<u8>){
+    pub fn load_program(&mut self, program: &Vec<u8>) {
         for i in 0..(program.len() as u16) {
-            self.mem_write(0x0600 + i, program[i as usize]);
+            self.mem_write(0x8600 + i, program[i as usize]);
         }
-        self.mem_write_u16(PC_LOAD_ADDR, CODE_START_ADDR as u16);
+        self.mem_write_u16(0xFFFC, 0x8600);
     }
 
     pub fn load_and_run(&mut self, program: Vec<u8>){
@@ -446,8 +446,6 @@ impl CPU {
     }
 
     pub fn run_with_callback<F> (&mut self, mut callback: F) where F:FnMut(&mut CPU){
-        // manually set pc for now
-        self.pc = 0x0600;
         let ref opcodes = *opcode::OPCODES_MAP;
         loop {
             // callback
@@ -825,7 +823,5 @@ impl CPU {
     }
 
 }
-
-
 
 

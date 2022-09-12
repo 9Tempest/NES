@@ -1,4 +1,4 @@
-
+use crate::rom::*;
 //  _______________ $10000  _______________
 // | PRG-ROM       |       |               |
 // | Upper Bank    |       |               |
@@ -31,17 +31,21 @@ const RAM: u16 = 0x0000;
 const RAM_MIRRORS_END: u16 = 0x1FFF;
 const PPU_REGISTERS: u16 = 0x2000;
 const PPU_REGISTERS_MIRRORS_END: u16 = 0x3FFF;
+const ROM: u16 = 0x8000;
+const ROM_END: u16 = 0xFFFF;
 
 use crate::Mem;
 
 pub struct Bus {
     cpu_vram: [u8; 2048],
+    rom: Rom,
 }
 
 impl Bus {
-    pub fn new() -> Self {
+    pub fn new(rom: Rom) -> Self {
         Self{
-            cpu_vram: [0; 2048]
+            cpu_vram: [0; 2048],
+            rom: rom,
         }
     }
 }
@@ -55,6 +59,9 @@ impl Mem for Bus {
             }
             PPU_REGISTERS ..=PPU_REGISTERS_MIRRORS_END => {
                 todo!("PPU")
+            }
+            ROM ..=ROM_END => {
+                self.read_prg_rom(addr)
             }
             _ => {
                 println!("Ignoring mem access at {}", addr);
@@ -71,6 +78,9 @@ impl Mem for Bus {
             PPU_REGISTERS ..=PPU_REGISTERS_MIRRORS_END => {
                 todo!("PPU")
             }
+            ROM ..=ROM_END => {
+                panic!("Attempt to write to Cartridge ROM space")
+            }
             _ => {
                 println!("Ignoring mem access at {}", addr);
             }
@@ -78,4 +88,13 @@ impl Mem for Bus {
     }
 }
 
-
+impl Bus {
+    fn read_prg_rom(&self, mut addr: u16) -> u8 {
+        addr -= 0x8000;
+       if self.rom.prg_rom.len() == 0x4000 && addr >= 0x4000 {
+           //mirror if needed
+           addr = addr % 0x4000;
+       }
+       self.rom.prg_rom[addr as usize]
+    }
+}
