@@ -3,12 +3,15 @@ pub mod cartridge;
 pub mod cpu;
 pub mod opcodes;
 pub mod trace;
+pub mod ppu;
+pub mod ppu_registers;
 
 use bus::Bus;
 use cartridge::Rom;
 use cpu::Mem;
 use cpu::CPU;
 use trace::trace;
+use ppu::PPU;
 // use rand::Rng;
 
 use sdl2::event::Event;
@@ -39,7 +42,7 @@ fn color(byte: u8) -> Color {
     }
 }
 
-fn read_screen_state(cpu: &CPU, frame: &mut [u8; 32 * 3 * 32]) -> bool {
+fn read_screen_state(cpu: &mut CPU, frame: &mut [u8; 32 * 3 * 32]) -> bool {
     let mut frame_idx = 0;
     let mut update = false;
     for i in 0x0200..0x600 {
@@ -119,6 +122,8 @@ fn main() {
     file_path.push_str(".nes");
     println!("{}", file_path);
     let bytes: Vec<u8> = std::fs::read(file_path).unwrap();
+
+    // create Rom
     let rom = Rom::new(&bytes).unwrap();
 
     let bus = Bus::new(rom);
