@@ -17,7 +17,7 @@ pub fn trace(cpu: &mut CPU) -> String {
     let (mem_addr, stored_value) = match ops.mode {
         AddressingMode::Immediate | AddressingMode::NoneAddressing => (0, 0),
         _ => {
-            let addr = cpu.get_absolute_address(&ops.mode, begin + 1);
+            let (addr, _) = cpu.get_absolute_address(&ops.mode, begin + 1);
             (addr, cpu.mem_read(addr))
         }
     };
@@ -123,9 +123,11 @@ pub fn trace(cpu: &mut CPU) -> String {
         .trim()
         .to_string();
 
+    let (ppu_cycle, ppu_scan_line) = cpu.get_ppu_info();
+
     format!(
-        "{:47} A:{:02x} X:{:02x} Y:{:02x} P:{:02x} SP:{:02x}",
-        asm_str, cpu.register_a, cpu.register_x, cpu.register_y, cpu.status, cpu.stack_pointer,
+        "{:47} A:{:02x} X:{:02x} Y:{:02x} P:{:02x} SP:{:02x} PPU Cycles: {} PPU Scan Lines: {}",
+        asm_str, cpu.register_a, cpu.register_x, cpu.register_y, cpu.status, cpu.stack_pointer,ppu_cycle, ppu_scan_line
     )
     .to_ascii_uppercase()
 }

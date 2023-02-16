@@ -3,6 +3,8 @@
 use crate::cartridge::Mirroring;
 use crate::ppu_registers::{AddrRegister, ControlRegister, PPURegister, MaskRegister, StatusRegister, ScrollRegister};
 
+const  MAX_CYCLE:usize = 314;
+const MAX_SCAN_LINE:usize = 261;
 
 pub struct PPU{
     chr_rom: Vec<u8>,   // visuals of a game stored on a cartridge
@@ -13,6 +15,13 @@ pub struct PPU{
     mirroring: Mirroring,
 
     internal_data_buf: u8, // internal buffer behavior for RAM and ROM: read [0x2007] in CPU will return this data
+
+    // Clock cycles and scan lines
+    pub clock_cycles: usize,
+    pub scan_lines: usize,
+    nmi_irq: Option<u8>,
+    
+
 
     // 8 ppu registers
     // reg_ctrl: 0x2000 - instructs PPU on general logic flow (which memory table to use, if PPU should interrupt CPU, etc.)
@@ -46,6 +55,9 @@ impl PPU{
             oam_data: [0; 64 * 4],
             palette_table: [0; 32],
             internal_data_buf: 0,
+            clock_cycles: 0,
+            scan_lines: 0,
+            nmi_irq: None,
             reg_addr: AddrRegister::new(),
             reg_ctrl:ControlRegister::new(),
             reg_oam_addr: 0,
@@ -53,6 +65,11 @@ impl PPU{
             reg_status: StatusRegister::new(),
             reg_scroll: ScrollRegister::new(),
         }
+    }
+
+    pub fn pull_nmi_irq(&mut self) -> Option<u8>{
+        // take irq and leave num_irq to None
+        self.nmi_irq.take()
     }
 
 
@@ -66,7 +83,11 @@ impl PPU{
     }
 
     pub fn write_to_ctrl(&mut self, value: u8){
+        let before_ctrl_nmi = self.reg_ctrl.generate_vblank_nmi();
         self.reg_ctrl.update(value);
+        if !before_ctrl_nmi && self.reg_ctrl.generate_vblank_nmi() && self.reg_status.is_in_vblank(){
+            self.nmi_irq = Some(1);
+        }
     }
 
     pub fn write_to_oam_addr(&mut self, value: u8){
@@ -102,6 +123,14 @@ impl PPU{
                 self.palette_table[(addr-0x3f00) as usize] = value;
             }
             _ => panic!("unexpected access to mirrored space {}", addr),
+        }
+    }
+
+    pub fn write_oam_dma(&mut self, data: &[u8]) {
+        assert_eq!(data.len(), 256);
+        for x in data.iter() {
+            self.oam_data[self.reg_oam_addr as usize] = *x;
+            self.reg_oam_addr = self.reg_oam_addr.wrapping_add(1);
         }
     }
 
@@ -175,6 +204,52 @@ impl PPU{
             (Mirroring::HORIZONTAL, 3) => vram_index - 0x800,
             _ => vram_index
         }
+   }
+
+
+   // Main execution logic
+   pub fn tick(&mut self, cycles: usize){
+        self.clock_cycles += cycles;
+        if self.clock_cycles >= MAX_CYCLE {
+            self.scan_lines += 1;
+            self.clock_cycles -= MAX_CYCLE;
+        }
+
+        
+        // match self.clock_cycles {
+        //     // Cycles 1-256
+        //     // The data for each tile is fetched during this phase. Each memory access takes 2 PPU cycles to complete
+        //     1..=256 => {
+        //         //todo!("fetch data for bg");
+        //     }
+        //     //Cycles 257-320
+        //     // The tile data for the sprites on the next scanline are fetched here. Again, each memory access takes 2 PPU cycles to complete, and 4 are performed for each of the 8 sprites:
+        //     257..=320 => {
+        //         //todo!("fetch data for sprites")
+        //     }
+        //     321..=326 => {
+        //         // fetch
+        //     }
+        //     _ => {
+
+        //     }
+        // }
+        if self.scan_lines == 241{
+            
+            // generate irq
+            if self.reg_ctrl.generate_vblank_nmi(){
+                self.reg_status.set_vblank_status(true);
+                self.nmi_irq = Some(1);
+            }
+        }
+
+        if self.scan_lines > MAX_SCAN_LINE{
+            self.scan_lines = 0;
+            self.reg_status.reset_vblank_status();
+
+        }
+
+
    }
 }
 
@@ -363,24 +438,24 @@ pub mod test {
         assert_eq!(ppu.read_oam_data(), 0x77);
     }
 
-    // #[test]
-    // fn test_oam_dma() {
-    //     let mut ppu = PPU::new_empty_rom();
+    #[test]
+    fn test_oam_dma() {
+        let mut ppu = PPU::new_empty_rom();
 
-    //     let mut data = [0x66; 256];
-    //     data[0] = 0x77;
-    //     data[255] = 0x88;
+        let mut data = [0x66; 256];
+        data[0] = 0x77;
+        data[255] = 0x88;
 
-    //     ppu.write_to_oam_addr(0x10);
-    //     ppu.write_oam_dma(&data);
+        ppu.write_to_oam_addr(0x10);
+        ppu.write_oam_dma(&data);
 
-    //     ppu.write_to_oam_addr(0xf); //wrap around
-    //     assert_eq!(ppu.read_oam_data(), 0x88);
+        ppu.write_to_oam_addr(0xf); //wrap around
+        assert_eq!(ppu.read_oam_data(), 0x88);
 
-    //     ppu.write_to_oam_addr(0x10);
-    //     assert_eq!(ppu.read_oam_data(), 0x77);
+        ppu.write_to_oam_addr(0x10);
+        assert_eq!(ppu.read_oam_data(), 0x77);
   
-    //     ppu.write_to_oam_addr(0x11);
-    //     assert_eq!(ppu.read_oam_data(), 0x66);
-    // }
+        ppu.write_to_oam_addr(0x11);
+        assert_eq!(ppu.read_oam_data(), 0x66);
+    }
 }

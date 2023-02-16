@@ -139,6 +139,12 @@ bitflags! {
         ControlRegister::from_bits_truncate(0b0000_0000)
      }
 
+     pub fn generate_vblank_nmi(&mut self) -> bool {
+        self.contains(ControlRegister::GENERATE_NMI)
+     }
+
+
+
      pub fn vram_addr_increment(&self) -> u8{
         if !self.contains(ControlRegister::VRAM_ADD_INCREMENT) {
             1

@@ -59,6 +59,19 @@ impl Bus {
         }
         self.prg_rom[addr as usize]
     }
+
+    pub fn tick(&mut self, cycle: usize){
+        let ppu_cycle = 3 * cycle;
+        self.ppu.tick(ppu_cycle);
+    }
+
+    pub fn pull_nmi_irq(&mut self) -> Option<u8>{
+        self.ppu.pull_nmi_irq()
+    }
+
+    pub fn get_ppu_info(&self) -> (usize, usize){
+        (self.ppu.clock_cycles, self.ppu.scan_lines)
+    }
 }
 
 impl Mem for Bus {
@@ -103,6 +116,14 @@ impl Mem for Bus {
             0x2005 => self.ppu.write_to_scroll(data),
             0x2006 => self.ppu.write_to_ppu_addr(data),
             0x2007 => self.ppu.write_to_data(data),
+            0x4014 => {
+                let full_addr = (data as u16) >> 8;
+                let mirror_down_addr = (full_addr & 0b00000111_11111111) as usize;
+
+                // Writing $XX will upload 256 bytes of data from CPU page $XX00–$XXFF to the internal PPU OAM
+                let mem_block = &self.cpu_vram[mirror_down_addr..mirror_down_addr+0xff];
+                self.ppu.write_oam_dma(mem_block)
+            }
             PPU_REGISTERS_MIRROR_START..=PPU_REGISTERS_MIRRORS_END => {
                 let _mirror_down_addr = addr & 0b00100000_00000111;
                 self.mem_write(_mirror_down_addr, data)
